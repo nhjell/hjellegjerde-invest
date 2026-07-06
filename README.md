@@ -1,2 +1,1 @@
 # Hjellegjerde Invest
-# hjellegjerde-invest
