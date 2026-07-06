@@ -1,0 +1,51 @@
+# Universe of banking equities to screen.
+# yahoo_ticker uses the suffix Yahoo Finance expects (.AX for ASX, .BK for SET).
+banks:
+  - name: Commonwealth Bank of Australia
+    yahoo_ticker: CBA.AX
+    country: AUS
+  - name: Westpac Banking Corporation
+    yahoo_ticker: WBC.AX
+    country: AUS
+  - name: National Australia Bank
+    yahoo_ticker: NAB.AX
+    country: AUS
+  - name: ANZ Group Holdings
+    yahoo_ticker: ANZ.AX
+    country: AUS
+  - name: Macquarie Group
+    yahoo_ticker: MQG.AX
+    country: AUS
+  - name: Bank of Queensland
+    yahoo_ticker: BOQ.AX
+    country: AUS
+  - name: Bendigo and Adelaide Bank
+    yahoo_ticker: BEN.AX
+    country: AUS
+  - name: Bangkok Bank
+    yahoo_ticker: BBL.BK
+    country: THA
+  - name: Kasikornbank
+    yahoo_ticker: KBANK.BK
+    country: THA
+  - name: SCB X (Siam Commercial Bank)
+    yahoo_ticker: SCB.BK
+    country: THA
+  - name: Krung Thai Bank
+    yahoo_ticker: KTB.BK
+    country: THA
+  - name: TMBThanachart Bank
+    yahoo_ticker: TTB.BK
+    country: THA
+  - name: Bank of Ayudhya (Krungsri)
+    yahoo_ticker: BAY.BK
+    country: THA
+  - name: Kiatnakin Phatra Bank
+    yahoo_ticker: KKP.BK
+    country: THA
+  - name: Judo Bank Holdings
+    yahoo_ticker: JDO.AX
+    country: AUS
+  - name: Tisco Financial Group
+    yahoo_ticker: TISCO.BK
+    country: THA

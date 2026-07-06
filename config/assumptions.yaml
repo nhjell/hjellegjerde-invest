@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# EDIT THIS FILE to change the fair-value assumptions used across the model.
+# Nothing else needs to change - src/model.py just reads these values.
+# ---------------------------------------------------------------------------
+
+# Cost of capital (r) per country, as a flat placeholder until Stage 2 replaces
+# this with a per-bank CAPM estimate (risk_free_rate + beta * equity_risk_premium).
+cost_of_capital:
+  AUS: 0.08
+  THA: 0.12
+
+# Growth rate (g) method used in fair P/B = (payout_ratio * ROE) / (r - g)
+#   sustainable: g = ROE * (1 - payout_ratio), computed per bank from its own data
+#   flat: g = flat_growth_rate below, same for every bank
+growth:
+  method: sustainable
+  flat_growth_rate: 0.03
