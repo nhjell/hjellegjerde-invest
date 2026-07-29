@@ -76,3 +76,59 @@ def fetch_universe_snapshot(banks: list[dict], as_of: str | None = None, use_cac
         raw = fetch_snapshot(bank["yahoo_ticker"], as_of=as_of, use_cache=use_cache)
         records.append({**raw, "name": bank["name"], "country": bank["country"]})
     return records
+
+
+# --- Annual fundamentals history (for forecast normalisation & trend) -------
+# Cached separately from the snapshot cache: data/raw/history/{ticker}_{as_of}.json
+# (the snapshot loader globs data/raw/{ticker}/*.json, so history must not land there).
+HISTORY_DIR = RAW_DIR / "history"
+
+
+def fetch_annual_history(ticker: str, as_of: str | None = None, use_cache: bool = True) -> list[dict]:
+    """Fetch (or load from cache) per-fiscal-year ROE / payout / BVPS for one ticker.
+
+    Uses yfinance annual statements (~4 years is all the free endpoint exposes).
+    Each row: {fiscal_year_end, roe, payout_ratio, bvps}. Rows are chronological
+    (oldest first). ROE is net income / year-end equity, payout is cash
+    dividends paid / net income - the same definitions the exploratory
+    backtests used.
+    """
+    as_of = as_of or dt.date.today().isoformat()
+    path = HISTORY_DIR / f"{ticker}_{as_of}.json"
+
+    if use_cache and path.exists():
+        with open(path) as f:
+            return json.load(f)
+
+    t = yf.Ticker(ticker)
+    fin, bs, cf = t.financials, t.balance_sheet, t.cashflow
+    rows = []
+    if not fin.empty and not bs.empty:
+        for date in fin.columns:
+            try:
+                net_income = fin.loc["Net Income", date]
+                equity = bs.loc["Stockholders Equity", date]
+                shares = bs.loc["Ordinary Shares Number", date]
+                div_paid = (
+                    abs(cf.loc["Cash Dividends Paid", date])
+                    if "Cash Dividends Paid" in cf.index else None
+                )
+            except KeyError:
+                continue
+            import pandas as pd
+            if pd.isna(net_income) or pd.isna(equity) or pd.isna(shares) or shares == 0 or net_income == 0:
+                continue
+            rows.append(
+                {
+                    "fiscal_year_end": str(pd.Timestamp(date).date()),
+                    "roe": float(net_income / equity),
+                    "payout_ratio": float(div_paid / net_income) if div_paid is not None and not pd.isna(div_paid) else None,
+                    "bvps": float(equity / shares),
+                }
+            )
+    rows.sort(key=lambda r: r["fiscal_year_end"])
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(rows, f, indent=2)
+    return rows

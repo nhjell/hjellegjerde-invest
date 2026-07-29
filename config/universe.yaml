@@ -49,3 +49,19 @@ banks:
   - name: Tisco Financial Group
     yahoo_ticker: TISCO.BK
     country: THA
+
+  # --- Nordic expansion (added 2026-07-10) ----------------------------------
+  # To REMOVE these banks: delete (or comment out) the three entries below and
+  # rerun `python src/build_inputs.py && python src/run_valuation.py`.
+  # Everything downstream (panel, valuation, charts) keys off this list, so
+  # they disappear everywhere automatically. Their capm/country_anchors blocks
+  # in assumptions.yaml can stay - unused config entries are harmless.
+  - name: DNB Bank
+    yahoo_ticker: DNB.OL
+    country: NOR
+  - name: Skandinaviska Enskilda Banken (SEB)
+    yahoo_ticker: SEB-A.ST
+    country: SWE
+  - name: Danske Bank
+    yahoo_ticker: DANSKE.CO
+    country: DNK

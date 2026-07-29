@@ -1,17 +1,190 @@
-# ---------------------------------------------------------------------------
-# EDIT THIS FILE to change the fair-value assumptions used across the model.
-# Nothing else needs to change - src/model.py just reads these values.
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# EDIT THIS FILE to change every assumption used across the valuation pipeline.
+# It is the single source of truth for modelling inputs. src/ reads these values;
+# src/build_inputs.py materialises them into the auditable CSVs under
+# data/processed/ (cost_of_equity_inputs.csv, valuation_assumptions.csv, ...).
+# ===========================================================================
 
-# Cost of capital (r) per country, as a flat placeholder until Stage 2 replaces
-# this with a per-bank CAPM estimate (risk_free_rate + beta * equity_risk_premium).
+# ---------------------------------------------------------------------------
+# LEGACY (Stage 1 Gordon Growth screen). Kept so src/screen.py and the
+# exploratory backtests keep working unchanged. The residual income pipeline
+# does NOT use these - it uses the capm/forecast blocks below.
+# ---------------------------------------------------------------------------
 cost_of_capital:
   AUS: 0.08
   THA: 0.12
+  NOR: 0.09   # Nordic entries: legacy screen only, so screen.py doesn't crash
+  SWE: 0.09
+  DNK: 0.09
 
-# Growth rate (g) method used in fair P/B = (payout_ratio * ROE) / (r - g)
-#   sustainable: g = ROE * (1 - payout_ratio), computed per bank from its own data
-#   flat: g = flat_growth_rate below, same for every bank
 growth:
-  method: sustainable
+  method: sustainable          # g = ROE * (1 - payout_ratio), per bank
   flat_growth_rate: 0.03
+
+# ---------------------------------------------------------------------------
+# COST OF EQUITY (CAPM):  CoE = risk_free_rate + beta * equity_risk_premium
+#                                + country_risk_premium
+# Country risk premium makes explicit WHY Thai banks can rationally trade at a
+# lower P/B than Australian banks: investors demand a higher return for FX,
+# political, liquidity and macro risk, which lowers the fair P/B for the same
+# ROE. All numbers are editable placeholders - replace beta with regression
+# betas and the macro inputs with live market data when available.
+# ---------------------------------------------------------------------------
+capm:
+  # Override switch: when enabled, EVERY bank's cost of equity is forced to
+  # `rate`, ignoring CAPM entirely (betas/rf/ERP/CRP below are still computed
+  # and shown in cost_of_equity_inputs.csv for reference, just not used).
+  # Useful for isolating what the valuation says when required return is
+  # neutralised across countries. Set enabled: false to go back to CAPM.
+  flat_cost_of_equity:
+    enabled: true
+    rate: 0.10
+  country_defaults:
+    AUS:
+      risk_free_rate: 0.043        # ~10y Australian Commonwealth Govt Bond
+      equity_risk_premium: 0.055   # mature-market equity risk premium
+      country_risk_premium: 0.0    # base / home market
+      default_beta: 1.00
+    THA:
+      risk_free_rate: 0.025        # ~10y Thai Govt Bond
+      equity_risk_premium: 0.070   # higher base ERP for the market
+      country_risk_premium: 0.030  # FX + political + liquidity + macro risk
+      default_beta: 0.95
+    # --- Nordic (added 2026-07-10; estimates - refine against live yields) --
+    NOR:
+      risk_free_rate: 0.038        # ~10y Norwegian Govt Bond
+      equity_risk_premium: 0.050   # mature-market ERP
+      country_risk_premium: 0.0    # AAA sovereign
+      default_beta: 1.00
+    SWE:
+      risk_free_rate: 0.024        # ~10y Swedish Govt Bond
+      equity_risk_premium: 0.050
+      country_risk_premium: 0.0    # AAA sovereign
+      default_beta: 1.00
+    DNK:
+      risk_free_rate: 0.023        # ~10y Danish Govt Bond
+      equity_risk_premium: 0.050
+      country_risk_premium: 0.0    # AAA sovereign
+      default_beta: 1.00
+  # Per-bank beta overrides (illustrative - swap for measured betas). Any ticker
+  # not listed falls back to its country default_beta above.
+  beta_overrides:
+    CBA.AX: 0.95
+    WBC.AX: 1.05
+    NAB.AX: 1.05
+    ANZ.AX: 1.10
+    MQG.AX: 1.25
+    BOQ.AX: 1.15
+    BEN.AX: 1.10
+    JDO.AX: 1.30
+    BBL.BK: 0.95
+    KBANK.BK: 1.00
+    SCB.BK: 0.95
+    KTB.BK: 0.90
+    TTB.BK: 0.95
+    BAY.BK: 0.80
+    KKP.BK: 1.10
+    TISCO.BK: 0.90
+    # Nordic: floored at 0.90 as a sanity judgment - a leveraged bank can't
+    # plausibly be half as risky as its home market. Yahoo's raw 5y monthly
+    # local-index betas (DNB 0.34, SEB 0.42, DANSKE 0.59, pulled 2026-07-10)
+    # gave CoE ~4.5-5.5% and fair P/Bs of 3.3-4.3x; Blume-adjusted (0.56 /
+    # 0.61 / 0.73) still gave CoE ~5.5-6.6% and fair P/Bs ~2.8-3.1x. Both
+    # look like an index-quirk artifact, not real safety. Lower these back
+    # toward the Blume values if you disagree.
+    DNB.OL: 0.90
+    SEB-A.ST: 0.90
+    DANSKE.CO: 0.90
+
+# ---------------------------------------------------------------------------
+# FORECAST ASSUMPTIONS (v2, trajectory-aware) for the residual income model.
+# Method - documented in src/forecast.py, grounded in the residual-income
+# literature (abnormal-ROE persistence of roughly 0.6-0.8 per year):
+#   1. NORMALISE: the starting ROE/payout is the average of the last
+#      `history_years` reported fiscal years plus the current TTM snapshot,
+#      so one distorted year can't anchor the whole forecast.
+#   2. TRAJECTORY: the recent trend (slope of annual ROEs) tilts year 1 -
+#      a genuinely improving bank keeps some momentum, a sliding one keeps
+#      some slide - capped at trend_tilt_cap.
+#   3. REVERSION: from year 2 the abnormal ROE (ROE minus terminal ROE)
+#      decays geometrically at `persistence` per year - fast at first when far
+#      from normal, flattening out as it approaches, matching how bank ROEs
+#      actually mean-revert. Stable franchises get persistence + adjustment,
+#      volatile ones - adjustment.
+#   4. HARD LIMIT: every forecast year is clipped to roe_clip - no bank is
+#      allowed to extrapolate to unrealistic profitability.
+#   5. TERMINAL DISCIPLINE: terminal ROE = cost of equity + a durable
+#      franchise spread = franchise_weight x the bank's demonstrated average
+#      spread, capped at max_durable_spread (competition erodes excess
+#      returns; only real moats keep any forever).
+# Override any bank by editing data/processed/valuation_assumptions.csv.
+# ---------------------------------------------------------------------------
+forecast:
+  horizon_years: 10              # explicit years before the terminal perpetuity
+  history_years: 4               # past fiscal years used to normalise + read the trend
+  trend_tilt_weight: 0.5         # how much of the observed per-year ROE trend carries into year 1
+  trend_tilt_cap: 0.02           # tilt can never move year 1 by more than +/-2 ROE points
+  persistence: 0.80            # base annual persistence of abnormal ROE (literature ~0.6-0.8)
+  persistence_adjustment: 0.10   # +/- applied for stable vs volatile ROE track records
+  persistence_bounds: [0.60, 0.92]
+  # Sanity clips applied to every forecast year (the hard "realistic" limits).
+  payout_clip: [0.30, 0.90]      # sustainable long-run dividend payout band
+  roe_clip: [0.04, 0.18]         # plausible bank ROE band, applied year by year
+  # Terminal ROE discipline: terminal_roe = CoE + clip(franchise_weight *
+  # (normalised ROE - CoE), spread_floor, max_durable_spread)
+  terminal:
+    franchise_weight: 0.75        # fraction of the demonstrated excess spread that survives forever
+    max_durable_spread: 0.05     # no bank sustains more than +2% over its CoE in perpetuity
+    spread_floor: -0.04          # structurally weak banks can sit slightly below CoE forever
+  # Payout terminal still blends toward the country anchor (payout is a
+  # second-order driver in residual income - it only changes how fast book
+  # compounds, so the simpler rule is kept).
+  mean_reversion: 0.60
+  country_anchors:
+    AUS:
+      terminal_roe: 0.11         # fallback only (used when a bank has no usable ROE data)
+      terminal_payout: 0.75
+      terminal_growth: 0.035     # long-run nominal growth (must stay < terminal CoE)
+    THA:
+      terminal_roe: 0.105        # fallback only
+      terminal_payout: 0.55
+      terminal_growth: 0.040
+    # --- Nordic (added 2026-07-10) - high-payout, high-ROE banking markets --
+    NOR:
+      terminal_roe: 0.12         # fallback only
+      terminal_payout: 0.65
+      terminal_growth: 0.035
+    SWE:
+      terminal_roe: 0.115        # fallback only
+      terminal_payout: 0.65
+      terminal_growth: 0.030
+    DNK:
+      terminal_roe: 0.11         # fallback only
+      terminal_payout: 0.60
+      terminal_growth: 0.030
+
+# ---------------------------------------------------------------------------
+# SCENARIO ANALYSIS: additive shifts applied to ROE, cost of equity and
+# terminal growth across all years. Base = central case (no shift).
+# ---------------------------------------------------------------------------
+scenarios:
+  base:
+    roe_shift: 0.000
+    coe_shift: 0.000
+    terminal_growth_shift: 0.0000
+  bull:
+    roe_shift: 0.010
+    coe_shift: -0.005
+    terminal_growth_shift: 0.0025
+  bear:
+    roe_shift: -0.010
+    coe_shift: 0.005
+    terminal_growth_shift: -0.0025
+
+# ---------------------------------------------------------------------------
+# SENSITIVITY ANALYSIS grids (absolute shifts around each bank's base inputs).
+# ---------------------------------------------------------------------------
+sensitivity:
+  terminal_roe_shifts: [-0.03, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03]
+  terminal_coe_shifts: [-0.02, -0.01, 0.0, 0.01, 0.02]
+  terminal_growth_shifts: [-0.01, -0.005, 0.0, 0.005, 0.01]
