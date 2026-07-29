@@ -1,8 +1,8 @@
 """Charts for the residual income pipeline.
 
-Uses plotly to stay consistent with the existing Stage 1 charts (standalone,
-interactive HTML that opens in any browser). Every function returns the figure
-and, if given a filename, also writes it to outputs/charts/.
+Uses Plotly to produce standalone, interactive HTML that opens in any browser.
+Every function returns the figure and, when given a filename, also writes it to
+``outputs/charts/``.
 """
 
 from __future__ import annotations

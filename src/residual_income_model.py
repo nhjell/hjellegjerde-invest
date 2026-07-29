@@ -1,4 +1,4 @@
-"""5-year residual income (excess return) valuation for banks.
+"""Configurable-horizon residual income (excess return) valuation for banks.
 
 Why residual income and not DCF/FCFF for banks
 -----------------------------------------------
@@ -13,7 +13,7 @@ A bank that earns exactly its cost of equity is worth exactly its book value
 (fair P/B = 1). Value is created only when ROE > CoE. The intrinsic value per
 share is today's book value plus the present value of all future excess returns:
 
-    IV_0 = BVPS_0 + sum_{t=1..5} PV(RI_t) + PV(Terminal Value)
+    IV_0 = BVPS_0 + sum_{t=1..H} PV(RI_t) + PV(Terminal Value)
     Fair P/B = IV_0 / BVPS_0
 
 This module is bank-by-bank and country-aware: every bank carries its own ROE,

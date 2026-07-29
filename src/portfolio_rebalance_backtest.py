@@ -1,10 +1,10 @@
 """Exploratory backtest: annual-rebalance cheap-half vs expensive-half portfolio,
 using one shared reshuffle date per year and actual daily price paths.
 
-NOT the rigorous Stage 4 backtest - a quick, small-sample exploration of
-whether sorting banks by the Stage 1 valuation gap and rebalancing annually
-produces a return spread, using real daily prices instead of point-to-point
-annual returns.
+This is not the point-in-time residual-income backtest. It is a quick,
+small-sample exploration of whether sorting banks by the legacy GGM valuation
+gap and rebalancing annually produces a return spread, using real daily prices
+instead of point-to-point annual returns.
 
 Rebalance rule: on 1 Jan each year, value every bank using the most recently
 reported fiscal year's ROE/payout (i.e. last year's annual report - the one

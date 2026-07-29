@@ -1,7 +1,7 @@
 """Exploratory backtest: does the fair-P/B valuation gap predict forward returns?
 
-NOT the rigorous Stage 4 backtest - a quick, small-sample exploration to sanity
-check the Stage 1 model's r assumption before investing in Stage 2/3.
+This is not the point-in-time residual-income backtest. It is a quick,
+small-sample exploration of the legacy GGM screen's required-return assumption.
 
 Question: is the fair-P/B signal (actual P/B minus model fair P/B) actually
 informative about forward returns, or is the "everything looks overvalued"

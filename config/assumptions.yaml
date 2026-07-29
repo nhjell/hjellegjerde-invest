@@ -37,7 +37,7 @@ capm:
   # Useful for isolating what the valuation says when required return is
   # neutralised across countries. Set enabled: false to go back to CAPM.
   flat_cost_of_equity:
-    enabled: true
+    enabled: false
     rate: 0.10
   country_defaults:
     AUS:
@@ -134,7 +134,7 @@ forecast:
   # (normalised ROE - CoE), spread_floor, max_durable_spread)
   terminal:
     franchise_weight: 0.75        # fraction of the demonstrated excess spread that survives forever
-    max_durable_spread: 0.05     # no bank sustains more than +2% over its CoE in perpetuity
+    max_durable_spread: 0.05     # no bank sustains more than +5% over its CoE in perpetuity
     spread_floor: -0.04          # structurally weak banks can sit slightly below CoE forever
   # Payout terminal still blends toward the country anchor (payout is a
   # second-order driver in residual income - it only changes how fast book

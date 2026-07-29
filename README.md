@@ -1,212 +1,265 @@
-# Australian and Thai Bank Equity Valuation using Residual Income and Price-to-Book Modelling
+# Bank Equity Valuation with Residual Income
 
-A Python framework that values 16 Australian (ASX) and Thai (SET) banks through
-**book value and residual income** rather than conventional free cash flow, and
-converts the result into an **implied fair Price-to-Book (P/B) ratio** that is
-compared against the actual market P/B to flag relative mispricing.
+A transparent Python research pipeline for valuing 19 listed banks across
+Australia, Thailand, Norway, Sweden, and Denmark. The project converts
+bank-specific forecasts for return on equity (ROE), payout, and cost of equity
+into an implied fair price-to-book ratio (P/B), then compares fair P/B with the
+market P/B to rank possible under- and overvaluation.
 
-The universe is 8 Australian banks (CBA, WBC, NAB, ANZ, MQG, BOQ, BEN, JDO) and
-8 Thai banks (BBL, KBANK, SCB, KTB, TTB, BAY, KKP, TISCO), defined in
-[`config/universe.yaml`](config/universe.yaml).
+The main workflow is configuration-driven, writes auditable intermediate CSVs,
+and produces standalone interactive Plotly charts. It is a research tool—not
+investment advice or a production trading system.
 
----
+## What the repository does
 
-## Why this model
+| Stage | Purpose | Main file |
+|---|---|---|
+| 1. Define | Set the bank universe and model assumptions | `config/*.yaml` |
+| 2. Fetch | Cache current Yahoo Finance snapshots and annual fundamentals | `src/fetch.py` |
+| 3. Build | Turn raw cache files and configuration into reviewable model inputs | `src/build_inputs.py` |
+| 4. Value | Run the residual-income model for every bank | `src/run_valuation.py` |
+| 5. Compare | Rank mispricing and run country, scenario, and sensitivity analyses | `src/relative_value.py`, `src/scenarios.py`, `src/sensitivity.py` |
+| 6. Review | Inspect generated CSV tables and interactive HTML charts | `data/processed/`, `outputs/` |
 
-**Why P/B for banks.** A bank's assets and liabilities are marked close to fair
-value and its earnings are generated *on* its book of equity, so book value is a
-meaningful anchor and P/B is the natural comparable — far more so than P/E or
-EV/EBITDA.
+The active universe is defined only in
+[`config/universe.yaml`](config/universe.yaml):
 
-**Why residual income, not DCF.** For a bank, debt (deposits and wholesale
-funding) is raw material used to make loans, not just financing. Enterprise
-value / free-cash-flow-to-firm frameworks — which treat debt as a financing
-claim to be netted off — do not apply cleanly. Residual income values the
-**equity directly** off book value plus the *excess* return the bank earns above
-its cost of equity.
+| Market | Country code | Banks | Yahoo suffix |
+|---|---:|---:|---|
+| Australia | `AUS` | 8 | `.AX` |
+| Thailand | `THA` | 8 | `.BK` |
+| Norway | `NOR` | 1 | `.OL` |
+| Sweden | `SWE` | 1 | `.ST` |
+| Denmark | `DNK` | 1 | `.CO` |
+| **Total** |  | **19** |  |
 
-**Why GGM is only a shortcut.** A single-stage Gordon Growth Model (the original
-Stage 1 screen, still available via `src/screen.py`) collapses the entire future
-into one ROE, one payout and one growth rate. The residual income model lets ROE,
-payout and cost of equity vary year by year and mean-revert to a long-run
-terminal state — a more defensible picture of a bank whose profitability is
-currently above or below its sustainable level.
+## Why residual income
 
-**Why Australia and Thailand differ.** Cost of equity is built from CAPM plus an
-explicit **country risk premium**. Thailand carries an added premium for FX,
-political, liquidity and macro risk, which raises its required return and, for
-the same ROE, *lowers* its fair P/B. This is how the model explains — rather than
-just observes — why Thai banks can rationally trade below Australian banks.
+Deposits and wholesale funding are operating inputs for a bank, so conventional
+enterprise-value and free-cash-flow-to-firm approaches do not fit as cleanly as
+they do for non-financial companies. This model values equity directly:
 
----
-
-## The model
-
-For each bank, over a 10-year explicit forecast horizon:
-
-```
-EPS_t              = ROE_t * BVPS_{t-1}
-Dividends_t        = EPS_t * payout_t
-Retained_t         = EPS_t - Dividends_t
-BVPS_t             = BVPS_{t-1} + Retained_t
-Residual_Income_t  = (ROE_t - CostOfEquity_t) * BVPS_{t-1}
-PV(RI_t)           = RI_t / prod_{k=1..t}(1 + CostOfEquity_k)
+```text
+EPS_t             = ROE_t × BVPS_(t-1)
+Dividends_t       = EPS_t × payout_t
+BVPS_t            = BVPS_(t-1) + EPS_t - Dividends_t
+Residual income_t = (ROE_t - CoE_t) × BVPS_(t-1)
 ```
 
-Terminal value (a growing perpetuity of residual income beyond the horizon H):
+For an explicit horizon of `H` years:
 
-```
-Terminal_RI   = (Terminal_ROE - Terminal_CoE) * BVPS_H
-Terminal_Val  = Terminal_RI / (Terminal_CoE - Terminal_Growth)
-PV(Terminal)  = Terminal_Val / prod_{k=1..H}(1 + CostOfEquity_k)
-```
-
-Intrinsic value, fair P/B and mispricing:
-
-```
-Intrinsic_Value_Per_Share = BVPS_0 + sum_{t=1..H} PV(RI_t) + PV(Terminal)
-Fair_PB                   = Intrinsic_Value_Per_Share / BVPS_0
-Mispricing                = Fair_PB / Actual_PB - 1
+```text
+Intrinsic value = BVPS_0 + Σ PV(residual income_t) + PV(terminal value)
+Fair P/B        = intrinsic value / BVPS_0
+Mispricing      = fair P/B / actual P/B - 1
 ```
 
-A positive mispricing means the model's fair P/B sits above the market's P/B →
-**undervalued**; negative → **overvalued**. A bank earning exactly its cost of
-equity is worth book value (fair P/B = 1); value is created only when ROE > CoE.
+A positive mispricing estimate means modelled fair P/B is above market P/B;
+a negative estimate means it is below market P/B. A bank earning exactly its
+cost of equity has no residual income and is worth book value under the model.
 
-**ROE forecasting (v2, trajectory-aware — see `src/forecast.py`):** the starting
-level is a *normalised* multi-year average (last ~4 fiscal years + current TTM),
-so one distorted year can't anchor the forecast. The recent trend tilts year 1
-(an improving bank keeps some momentum, capped at ±2 ROE points), then the
-abnormal component of ROE decays geometrically toward terminal at an empirical
-persistence rate (~0.75/yr, higher for stable franchises, lower for volatile
-ones), with every year hard-clipped to a realistic band. The terminal ROE is
-disciplined economically: `terminal_ROE = CoE + clip(0.5 × demonstrated spread,
-−1%, +2%)` — only half of a bank's demonstrated excess return survives forever,
-and never more than 2% over the cost of equity. Per-bank inputs and the exact
-normalisation/trend/persistence used are audited in
-`data/processed/forecast_diagnostics.csv`.
+Terminal value is a growing perpetuity of residual income:
 
-**Cost of equity (CAPM with country risk):**
-
-```
-CoE = risk_free_rate + beta * equity_risk_premium + country_risk_premium
+```text
+Terminal residual income = (terminal ROE - terminal CoE) × BVPS_H
+Terminal value           = terminal residual income / (terminal CoE - g)
 ```
 
-All inputs live in [`config/assumptions.yaml`](config/assumptions.yaml) and are
-materialised into auditable CSVs under `data/processed/`.
+The implementation rejects terminal assumptions where `terminal CoE <= g`,
+because the perpetuity would not be economically or mathematically valid.
 
----
+## Forecast and cost-of-equity logic
 
-## Project layout
+The current explicit forecast horizon is 10 years and is controlled by
+`forecast.horizon_years` in
+[`config/assumptions.yaml`](config/assumptions.yaml).
 
-```
-config/
-  universe.yaml            # the 16 banks
-  assumptions.yaml         # CAPM, forecast anchors, scenarios, sensitivity grids
-data/
-  raw/                     # cached yfinance snapshots (JSON, keyed by ticker/date)
-  processed/               # generated input + result CSVs
-src/
-  config.py                # load YAML config
-  utils.py                 # paths, logging, CSV I/O, numeric cleaning
-  fetch.py                 # yfinance snapshot + annual-history fetch -> data/raw cache
-  build_inputs.py          # cache + config  -> data/processed input CSVs
-  data_loader.py           # read processed CSVs, merge into modelling panel
-  cost_of_equity.py        # CAPM cost of equity + country comparison
-  forecast.py              # trajectory-aware ROE/payout path generation (v2)
-  residual_income_model.py # the multi-year residual income valuation
-  relative_value.py        # mispricing, ranking, z-scores
-  scenarios.py             # base / bull / bear scenario analysis
-  sensitivity.py           # 2-way sensitivity grids (terminal ROE vs CoE, ...)
-  plots.py                 # plotly charts
-  backtest.py              # lookahead-safe backtest scaffold + performance metrics
-  run_valuation.py         # <-- main pipeline entry point
-  screen.py, model.py, *_backtest.py, pb_vs_avg_roe_chart.py   # Stage 1 (legacy GGM)
-outputs/
-  charts/                  # standalone interactive HTML charts
-  tables/                  # sensitivity tables
-tests/                     # pytest unit tests
+ROE forecasts are generated in five steps:
+
+1. Average the latest available annual observations and current snapshot.
+2. Apply a capped first-year tilt from the recent ROE trend.
+3. Mean-revert abnormal ROE toward a terminal level using a persistence factor.
+4. Clip each forecast year to the configured realistic ROE range.
+5. Estimate terminal ROE as cost of equity plus a capped fraction of the
+   bank's demonstrated excess return.
+
+Cost of equity uses CAPM plus an explicit country risk premium:
+
+```text
+CoE = risk-free rate + beta × equity risk premium + country risk premium
 ```
 
----
+The generated `data/processed/forecast_diagnostics.csv` records the normalized
+ROE, trend, persistence, terminal ROE, and payout choices for each bank.
 
-## Usage
+## Quick start
 
-Install dependencies (a virtualenv at `.venv` is assumed):
+Python 3.12 or newer is recommended.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-Run the full residual income pipeline:
+A fresh clone contains configuration and selected example outputs, but raw and
+processed data are intentionally Git-ignored. Fetch current data, build the
+inputs, and run the valuation:
 
 ```bash
-python src/build_inputs.py     # generate data/processed input CSVs from cache + config
-python src/run_valuation.py    # value all banks, run scenarios/sensitivity, write charts
-```
-
-`run_valuation.py` will call `build_inputs.py` automatically if the processed
-inputs are missing, so the second command alone is enough on a fresh checkout
-that already has the raw cache.
-
-**Outputs** (written by `run_valuation.py`):
-
-| File | Contents |
-|------|----------|
-| `data/processed/valuation_results.csv` | Fair P/B, actual P/B, mispricing, rank per bank |
-| `data/processed/valuation_yearly_detail.csv` | Year-by-year BVPS/EPS/DPS/RI/PV per bank |
-| `data/processed/relative_value_table.csv` | Mispricing + global/country z-scores + signal |
-| `data/processed/scenario_results.csv` | Fair P/B under base / bull / bear |
-| `data/processed/cost_of_equity_by_country.csv` | Average CoE and components by country |
-| `outputs/tables/sensitivity_terminal_roe_vs_coe.csv` | Fair P/B sensitivity grid per bank |
-| `outputs/charts/ri_*.html` | Interactive charts (open in any browser) |
-
-Refresh live data (overwrites today's raw snapshots, then rebuild):
-
-```bash
-python src/fetch.py 2>/dev/null || true   # (fetch is invoked via screen.py in Stage 1)
+python src/fetch.py
 python src/build_inputs.py
+python src/run_valuation.py
 ```
 
-Notebooks in `notebooks/` can import the modules by adding `src/` to the path:
+`run_valuation.py` automatically runs `build_inputs.py` when required processed
+inputs are missing. It does not download market data automatically, so a fresh
+clone still needs `fetch.py` first.
 
-```python
-import sys; sys.path.insert(0, "src")
-import data_loader, residual_income_model
-```
-
-Run the tests:
+To replace today's cached Yahoo Finance data before rebuilding:
 
 ```bash
-python -m pytest tests/ -q
+python src/fetch.py --refresh
+python src/build_inputs.py
+python src/run_valuation.py
 ```
 
----
+Useful fetch modes:
 
-## Assumptions and data still required
+| Command | Result |
+|---|---|
+| `python src/fetch.py` | Fetch or reuse today's snapshot and annual history for all configured banks |
+| `python src/fetch.py --refresh` | Redownload and overwrite today's cache |
+| `python src/fetch.py --snapshot-only` | Update only point-in-time market/fundamental snapshots |
+| `python src/fetch.py --history-only` | Update only annual ROE, payout, and BVPS history |
 
-- **Betas are illustrative placeholders** in `config/assumptions.yaml` — replace
-  `beta_overrides` with regression betas estimated against a local market index.
-- **Macro inputs** (risk-free rates, equity risk premia, country risk premium)
-  are static config values; wire them to live market data for production use.
-- **Forecasts are mechanical** — normalised multi-year starting levels, a capped
-  trend tilt, then persistence-based decay toward a disciplined terminal (see
-  `src/forecast.py`). The generated `data/processed/valuation_assumptions.csv`
-  is still meant to be hand-edited per bank where you have an analyst view, and
-  `forecast_diagnostics.csv` shows exactly what the generator chose and why.
-- **Point-in-time history**: `yfinance` only exposes ~4 years of annual
-  financials, which caps how far back the backtest can reach.
+Yahoo Finance access is required only for the fetch step. Building inputs,
+running valuations, tests, and chart generation work from local files.
 
-## Next steps for backtesting
+## Configuration
 
-`src/backtest.py` contains a lookahead-safe scaffold. The strategy: at each
-quarterly rebalance, value banks using only data available on that date, rank by
-mispricing, hold the top-N most undervalued equal-weighted, and benchmark against
-the equal-weighted universe. Performance metrics (CAGR, volatility, Sharpe, max
-drawdown, hit rate, benchmark excess) are implemented. The remaining work is to
-supply a **historical point-in-time fundamentals feed** — `src/fetch.py` is
-already keyed by `as_of` date for exactly this purpose — so that
-`generate_point_in_time_assumptions` can be driven off real reported history
-without lookahead bias.
+[`config/assumptions.yaml`](config/assumptions.yaml) is the single source of
+truth for model settings.
+
+| Section | Controls |
+|---|---|
+| `capm.flat_cost_of_equity` | Optional common CoE override for comparison runs |
+| `capm.country_defaults` | Risk-free rate, ERP, country premium, and fallback beta |
+| `capm.beta_overrides` | Per-bank beta assumptions |
+| `forecast` | Horizon, history window, trend tilt, persistence, and sanity clips |
+| `forecast.terminal` | Durable franchise spread, cap, and floor |
+| `forecast.country_anchors` | Fallback terminal ROE, payout, and growth by country |
+| `scenarios` | Additive bull/base/bear shifts |
+| `sensitivity` | Terminal ROE, CoE, and growth stress grids |
+| `cost_of_capital`, `growth` | Inputs for the older single-stage GGM screen only |
+
+All percentage-like model inputs are decimals: `0.10` means 10%.
+
+After changing the universe or assumptions, rebuild the processed inputs before
+running the model:
+
+```bash
+python src/build_inputs.py
+python src/run_valuation.py
+```
+
+Generated CSVs are overwritten by `build_inputs.py`. If you want to preserve a
+manual analyst case, copy it elsewhere or encode the change in configuration
+before rebuilding.
+
+## Outputs
+
+The main pipeline writes:
+
+| Path | Contents |
+|---|---|
+| `data/processed/bank_panel.csv` | Joined universe, fundamentals, and CoE inputs |
+| `data/processed/valuation_assumptions.csv` | Annual forecast and terminal rows by bank |
+| `data/processed/forecast_diagnostics.csv` | Audit trail for generated forecast paths |
+| `data/processed/valuation_results.csv` | Intrinsic value, fair P/B, actual P/B, and rank |
+| `data/processed/valuation_yearly_detail.csv` | Year-by-year book value and residual income |
+| `data/processed/relative_value_table.csv` | Mispricing, z-scores, signal, and rank |
+| `data/processed/scenario_results.csv` | Base, bull, and bear fair P/B estimates |
+| `data/processed/cost_of_equity_by_country.csv` | Average CoE components by country |
+| `outputs/tables/sensitivity_terminal_roe_vs_coe.csv` | Per-bank sensitivity grid |
+| `outputs/charts/ri_*.html` | Standalone interactive Plotly charts |
+
+Files already committed under `outputs/` and `logs/` are historical research
+artifacts. Their dates and assumptions may differ from a newly generated run;
+regenerate the pipeline when you need current, internally consistent results.
+
+## Repository layout
+
+```text
+config/
+  assumptions.yaml              Model, scenario, and sensitivity settings
+  universe.yaml                 Configured bank universe
+data/
+  raw/                          Local Yahoo Finance JSON cache (ignored)
+  processed/                    Generated model inputs/results (ignored)
+logs/                           Historical project reports
+outputs/
+  charts/                       Interactive HTML research charts
+  tables/                       Generated and historical result tables
+src/
+  fetch.py                      Data-cache command and Yahoo Finance adapter
+  build_inputs.py               Raw/config to auditable processed inputs
+  forecast.py                   ROE and payout forecast generation
+  cost_of_equity.py             CAPM and country-risk calculations
+  residual_income_model.py      Core valuation engine
+  relative_value.py             Ranking, z-scores, and signals
+  scenarios.py                  Bull/base/bear cases
+  sensitivity.py                Two-variable valuation stresses
+  plots.py                      Residual-income charts
+  run_valuation.py              Main end-to-end valuation command
+  screen.py, model.py           Legacy single-stage GGM screen
+  backtest.py                   Point-in-time RI backtest framework
+  *_backtest.py                 Exploratory legacy backtests
+tests/                          Unit tests for core model components
+```
+
+The `notebooks/` directory is currently a placeholder; the maintained workflow
+uses the scripts above.
+
+## Testing
+
+```bash
+python -m pytest tests -q
+```
+
+The tests cover cost of equity, forecast construction, residual-income
+valuation, and relative-value ranking.
+
+## Backtesting status
+
+`src/backtest.py` contains a lookahead-aware framework: at each rebalance it
+uses only fundamentals reported on or before that date, values the available
+banks, holds the top-ranked names, and compares them with an equal-weighted
+universe. Performance metrics are implemented.
+
+The missing production input is a reliable historical point-in-time
+fundamentals feed. Yahoo Finance's current snapshot endpoint cannot recreate
+what the market knew on an arbitrary past date, so the framework should not be
+presented as a completed historical validation.
+
+## Important limitations
+
+- Yahoo Finance fields can be missing, delayed, restated, or defined
+  inconsistently across markets.
+- Betas and macro assumptions are editable research estimates, not live feeds.
+- Terminal value can be a large part of intrinsic value; use the scenario and
+  sensitivity outputs rather than relying on a single point estimate.
+- Currency values are modelled per share within each listing. Do not compare
+  intrinsic value per share across currencies; compare dimensionless P/B and
+  mispricing measures.
+- A model signal is not a recommendation. Capital adequacy, asset quality,
+  regulation, liquidity, governance, and market-specific risks require separate
+  analysis.
+
+## Legacy tools
+
+`src/screen.py` and `src/model.py` retain the original single-stage Gordon
+Growth fair-P/B screen for comparison. The residual-income pipeline in
+`src/run_valuation.py` is the primary maintained workflow. The exploratory
+backtest scripts are research artifacts and are not substitutes for the
+point-in-time framework in `src/backtest.py`.

@@ -4,7 +4,7 @@
 
 Steps:
   1. Ensure processed inputs exist (build them from the cache + config if not).
-  2. Value every bank with the 5-year residual income model.
+  2. Value every bank over the configured residual-income forecast horizon.
   3. Build the relative value table (mispricing, z-scores, ranks).
   4. Compare cost of equity across countries.
   5. Run base / bull / bear scenario analysis.

@@ -4,8 +4,9 @@ Strategy under test
 -------------------
 At each rebalance date: using only data available on or before that date,
 estimate each bank's trailing ROE, payout and cost of equity, mechanically roll
-those into a 5-year residual income valuation, rank banks by mispricing, buy the
-top-N most undervalued (equal weight) and hold until the next rebalance. The
+those into a configurable-horizon residual income valuation, rank banks by
+mispricing, buy the top-N most undervalued (equal weight), and hold until the
+next rebalance. The
 benchmark is the equal-weighted universe.
 
 Anti-lookahead contract
@@ -57,7 +58,7 @@ def generate_point_in_time_assumptions(
     forecast_cfg: dict,
     coe_by_ticker: dict,
 ) -> pd.DataFrame:
-    """Build 5y forecast + terminal assumptions from data known at `as_of`.
+    """Build forecast + terminal assumptions from data known at `as_of`.
 
     fundamentals_history: long DataFrame with at least
         ticker, report_date, roe, payout_ratio, country
@@ -111,10 +112,10 @@ def run_relative_value_backtest(
     Returns a per-period DataFrame: rebalance_date, strategy_return,
     benchmark_return, holdings.
 
-    NOTE: this requires a historical point-in-time fundamentals feed to be
-    supplied by the caller. yfinance only exposes ~4y of annual financials, so
-    wiring a real feed (or the cached snapshots keyed by as_of via src/fetch.py)
-    is the remaining Stage 4 task. The loop itself is lookahead-safe.
+    NOTE: this requires a historical point-in-time fundamentals feed supplied
+    by the caller. Yahoo Finance's current snapshot endpoint cannot reconstruct
+    the information set available on an arbitrary past date. The loop itself
+    enforces its no-lookahead date filters.
     """
     rebal_dates = get_rebalance_dates(price_data, frequency)
     records = []

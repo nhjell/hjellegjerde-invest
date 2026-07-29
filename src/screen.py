@@ -1,4 +1,4 @@
-"""Stage 1 entry point: fetch -> screen -> table + chart.
+"""Legacy single-stage GGM entry point: fetch -> screen -> table + chart.
 
 Run with:  python src/screen.py
 Outputs:
@@ -17,13 +17,20 @@ from fetch import fetch_universe_snapshot
 from model import build_screen_table
 
 ROOT = Path(__file__).resolve().parent.parent
-COUNTRY_COLORS = {"AUS": "#1f77b4", "THA": "#d62728"}
+COUNTRY_COLORS = {
+    "AUS": "#1f77b4",
+    "THA": "#d62728",
+    "NOR": "#2ca02c",
+    "SWE": "#9467bd",
+    "DNK": "#e8a838",
+}
+FALLBACK_COLOR = "#7f7f7f"
 
 
 def build_chart(df, as_of: str) -> go.Figure:
     fig = go.Figure()
 
-    for country, color in COUNTRY_COLORS.items():
+    for country in sorted(df["country"].dropna().unique()):
         sub = df[df["country"] == country]
         fig.add_trace(
             go.Scatter(
@@ -33,7 +40,7 @@ def build_chart(df, as_of: str) -> go.Figure:
                 text=sub["ticker"],
                 textposition="top center",
                 name=country,
-                marker=dict(size=12, color=color),
+                marker=dict(size=12, color=COUNTRY_COLORS.get(country, FALLBACK_COLOR)),
             )
         )
 

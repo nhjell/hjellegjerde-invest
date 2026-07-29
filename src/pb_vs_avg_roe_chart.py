@@ -5,7 +5,7 @@ in line with their recent profitability (ROE), independent of the Gordon
 Growth fair-value model - high-ROE banks earning a premium P/B is expected;
 this just shows whether that premium looks proportionate across the universe.
 
-Uses the most recent Stage 1 screen CSV for actual P/B, and pulls ~4y annual
+Uses the most recent legacy GGM screen CSV for actual P/B, and pulls ~4y annual
 financials per bank (yfinance) to compute the trailing-3yr average ROE.
 
 Run with: python pb_vs_avg_roe_chart.py

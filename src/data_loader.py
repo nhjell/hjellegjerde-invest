@@ -50,7 +50,7 @@ def load_fundamentals() -> pd.DataFrame:
 
 
 def load_valuation_assumptions() -> pd.DataFrame:
-    # forecast_year stays as string so 'terminal' and '1'..'5' coexist.
+    # Keep forecast_year as text so numeric years and "terminal" coexist.
     df = load_csv(PROCESSED_DIR / _FILES["assumptions"], dtype={"forecast_year": str})
     return _standardise(df)
 

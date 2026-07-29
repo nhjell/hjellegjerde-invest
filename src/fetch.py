@@ -1,21 +1,26 @@
-"""Pull raw financial data for the bank universe.
+"""Fetch and cache Yahoo Finance data for the configured bank universe.
 
-Every pull is tagged with `as_of` (the date the data reflects) and cached to
-data/raw/{ticker}/{as_of}.json. Stage 1 only ever calls this with
-as_of=today (today's live snapshot from Yahoo Finance), but the on-disk
-layout and function signature are already keyed by as_of so that a future
-Stage 4 backtest can add a second fetcher (e.g. pulling historical filed
-financials) that writes into the same cache under past dates without
-touching the processed data shape or any downstream code.
+Run ``python src/fetch.py`` to populate today's snapshot and annual-history
+cache, or add ``--refresh`` to replace today's cached files. Every snapshot is
+tagged with ``as_of`` and stored under ``data/raw/{ticker}/{as_of}.json``.
+
+Yahoo's ``.info`` endpoint only represents the current information set. The
+date-keyed cache is useful for reproducibility, but it is not a historical
+point-in-time fundamentals source.
 """
 
+import argparse
 import datetime as dt
 import json
 from pathlib import Path
 
 import yfinance as yf
 
+from config import load_universe
+from utils import get_logger
+
 RAW_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
+logger = get_logger(__name__)
 
 # The .info fields we need to compute ROE, dividend yield, payout ratio, P/B.
 FIELDS = [
@@ -38,11 +43,10 @@ def _cache_path(ticker: str, as_of: str) -> Path:
 def fetch_snapshot(ticker: str, as_of: str | None = None, use_cache: bool = True) -> dict:
     """Fetch (or load from cache) the raw data for one ticker as of a given date.
 
-    as_of defaults to today. Historical as_of values are not fetchable from
-    Yahoo's .info endpoint (it only ever returns "now") - that's the gap
-    Stage 4 will need a different data source for. This function's shape
-    already accounts for that: callers pass as_of, get back cached-or-fresh
-    data, and don't need to know which source served it.
+    ``as_of`` defaults to today. Historical values are not fetchable from
+    Yahoo's ``.info`` endpoint because it only returns the current snapshot.
+    A point-in-time backtest therefore needs a different fundamentals source.
+    Callers still receive the same cached-or-fresh record shape.
     """
     as_of = as_of or dt.date.today().isoformat()
     path = _cache_path(ticker, as_of)
@@ -54,7 +58,7 @@ def fetch_snapshot(ticker: str, as_of: str | None = None, use_cache: bool = True
     if as_of != dt.date.today().isoformat():
         raise NotImplementedError(
             f"No historical data source wired up yet for {ticker} as_of={as_of}. "
-            "Stage 1 only supports as_of=today (live Yahoo Finance snapshot)."
+            "Yahoo Finance snapshots only support as_of=today."
         )
 
     info = yf.Ticker(ticker).info
@@ -132,3 +136,56 @@ def fetch_annual_history(ticker: str, as_of: str | None = None, use_cache: bool 
     with open(path, "w") as f:
         json.dump(rows, f, indent=2)
     return rows
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Cache current Yahoo Finance data for config/universe.yaml."
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="redownload and overwrite today's cached data",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--snapshot-only",
+        action="store_true",
+        help="fetch market/fundamental snapshots but not annual history",
+    )
+    mode.add_argument(
+        "--history-only",
+        action="store_true",
+        help="fetch annual history but not current snapshots",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    banks = load_universe()
+    use_cache = not args.refresh
+    failures = []
+
+    for bank in banks:
+        ticker = bank["yahoo_ticker"]
+        try:
+            if not args.history_only:
+                fetch_snapshot(ticker, use_cache=use_cache)
+            if not args.snapshot_only:
+                fetch_annual_history(ticker, use_cache=use_cache)
+            logger.info("Cached %s", ticker)
+        except Exception as exc:
+            failures.append(ticker)
+            logger.error("Failed to fetch %s: %s", ticker, exc)
+
+    completed = len(banks) - len(failures)
+    print(f"\nCached data for {completed}/{len(banks)} banks in {RAW_DIR}")
+    if failures:
+        print(f"Failed tickers: {', '.join(failures)}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

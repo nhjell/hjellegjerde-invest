@@ -9,7 +9,7 @@ Produces:
     data/processed/bank_universe.csv
     data/processed/bank_fundamentals.csv        (from cached yfinance snapshots)
     data/processed/cost_of_equity_inputs.csv    (CAPM inputs + CoE per bank)
-    data/processed/valuation_assumptions.csv    (5y forecast + terminal rows)
+    data/processed/valuation_assumptions.csv    (forecast + terminal rows)
     data/processed/bank_panel.csv               (merged view)
 
 It deliberately reads the *cached* JSON snapshots rather than re-downloading, so
